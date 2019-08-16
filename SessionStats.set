@@ -1,0 +1,5 @@
+Session Stats plugin
+9|This plugin will count wins/losses/mmr change
+1|Output text stats to files to be used as OBS sources|cl_stats_obs_output
+1|Display stats on screen|cl_stats_display_stats
+12|OBS files output directory|cl_stats_obs_directory
