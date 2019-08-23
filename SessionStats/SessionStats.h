@@ -21,6 +21,7 @@ private:
 	//std::shared_ptr<std::string> obsDir;
 
 	void writeStats();
+	void logStatusToConsole(std::string oldValue, CVarWrapper cvar);
 public:
 	virtual void onLoad();
 	virtual void onUnload();
