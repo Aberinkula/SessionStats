@@ -24,7 +24,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include <fstream>
 
 //#include <sysinfoapi.h>
-BAKKESMOD_PLUGIN(SessionStatsPlugin, "Session Stats plugin", "1.0", 0)
+BAKKESMOD_PLUGIN(SessionStatsPlugin, "Session Stats plugin", "1.01", 0)
 
 
 void SessionStatsPlugin::onLoad() {
@@ -64,7 +64,7 @@ void SessionStatsPlugin::onLoad() {
 	gameWrapper->HookEvent("Function TAGame.GameEvent_Soccar_TA.OnMatchWinnerSet", bind(&SessionStatsPlugin::EndGame, this, std::placeholders::_1));
 	//gameWrapper->HookEvent("Function TAGame.GameEvent_Soccar_TA.Destroyed", bind(&SessionStatsPlugin::EndGame, this, std::placeholders::_1));
 	//gameWrapper->HookEvent("Function TAGame.GameEvent_Soccar_TA.EventMatchEnded", bind(&SessionStatsPlugin::EndGame, this, std::placeholders::_1));
-	gameWrapper->HookEvent("Function TAGame.OnlineGame_TA.OnMainMenuOpened", bind(&SessionStatsPlugin::onMainMenu, this, std::placeholders::_1));
+	gameWrapper->HookEventPost("Function TAGame.OnlineGame_TA.OnMainMenuOpened", bind(&SessionStatsPlugin::onMainMenu, this, std::placeholders::_1));
 	gameWrapper->RegisterDrawable(std::bind(&SessionStatsPlugin::Render, this, std::placeholders::_1));
 }
 
@@ -77,7 +77,7 @@ void SessionStatsPlugin::ResetStats() {
 void SessionStatsPlugin::onMainMenu(std::string eventName) {
 	cvarManager->log("=======Main Menu=======");
 	cvarManager->log("=======================");
-	updateStats();
+	updateStats(2);
 }
 void SessionStatsPlugin::StartGame(std::string eventName) {
 	cvarManager->log("====BeginState==============================");
@@ -109,11 +109,16 @@ void SessionStatsPlugin::StartGame(std::string eventName) {
 }
 
 void SessionStatsPlugin::EndGame(std::string eventName) {
-	updateStats();
+	updateStats(10);
 }
 
-void SessionStatsPlugin::updateStats() {
-	cvarManager->log("===EndGame==================================");
+void SessionStatsPlugin::updateStats(int retryCount) {
+	std::stringstream ss;
+	ss << "===EndGame==================================  " << retryCount;
+	cvarManager->log(ss.str());
+
+	if (retryCount > 10 || retryCount < 0)
+		return;
 
 	if (stats.count(currentPlaylist) != 0) {
 		cvarManager->log("Updating current playlist");
@@ -123,7 +128,7 @@ void SessionStatsPlugin::updateStats() {
 			float mmr = -1.0f;
 			bool writeObs = cvarManager->getCvar("cl_sessionstats_obs_output").getBoolValue();
 
-			while (!gotNewMMR && (count < 10)) {// only try 10 times, then give up
+			while (!gotNewMMR && (count < 1)) {// only try 10 times, then give up
 				//ss.clear();
 				mmr = gameWrapper->GetMMRWrapper().GetPlayerMMR(mySteamID, currentPlaylist);
 				//ss << "Got updated MMR " << mmr << " old MMR was: " << stats[currentPlaylist].currentMMR;
@@ -146,8 +151,12 @@ void SessionStatsPlugin::updateStats() {
 					gotNewMMR = true;
 				}
 				count++;
-				Sleep(200);
-				cvarManager->log("slept");
+				if (!gotNewMMR && retryCount > 0)
+					gameWrapper->SetTimeout([retryCount, this](GameWrapper* gameWrapper) {
+						this->updateStats(retryCount - 1);
+					}, 0.2f);
+				//Sleep(200);
+				//cvarManager->log("slept");
 			}
 			stats[currentPlaylist].currentMMR = mmr;
 			std::stringstream ss;
@@ -165,8 +174,6 @@ void SessionStatsPlugin::updateStats() {
 	else {
 		cvarManager->log("Current Playlist MMR not stored?");
 	}
-
-	
 }
 
 static int writeIntFile(const std::string & fn, int val) {

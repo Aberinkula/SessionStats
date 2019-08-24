@@ -37,7 +37,7 @@ private:
 
 	void writeStats();
 	void logStatusToConsole(std::string oldValue, CVarWrapper cvar);
-	void updateStats();
+	void updateStats(int retryCount);
 public:
 	virtual void onLoad();
 	virtual void onUnload();
