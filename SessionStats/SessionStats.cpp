@@ -49,7 +49,7 @@ void SessionStatsPlugin::onLoad() {
 	gameWrapper->HookEvent("Function TAGame.GameEvent_Soccar_TA.OnMatchWinnerSet", bind(&SessionStatsPlugin::EndGame, this, std::placeholders::_1));
 	//gameWrapper->HookEvent("Function TAGame.GameEvent_Soccar_TA.Destroyed", bind(&SessionStatsPlugin::EndGame, this, std::placeholders::_1));
 	//gameWrapper->HookEvent("Function TAGame.GameEvent_Soccar_TA.EventMatchEnded", bind(&SessionStatsPlugin::EndGame, this, std::placeholders::_1));
-
+	gameWrapper->HookEvent("Function TAGame.OnlineGame_TA.OnMainMenuOpened", bind(&SessionStatsPlugin::onMainMenu, this, std::placeholders::_1));
 	gameWrapper->RegisterDrawable(std::bind(&SessionStatsPlugin::Render, this, std::placeholders::_1));
 }
 
@@ -57,6 +57,12 @@ void SessionStatsPlugin::ResetStats() {
 	stats.clear();
 	if (cvarManager->getCvar("cl_sessionstats_obs_output").getBoolValue())
 		writeStats();
+}
+
+void SessionStatsPlugin::onMainMenu(std::string eventName) {
+	cvarManager->log("=======Main Menu=======");
+	cvarManager->log("=======================");
+	updateStats();
 }
 void SessionStatsPlugin::StartGame(std::string eventName) {
 	cvarManager->log("====BeginState==============================");
@@ -88,6 +94,10 @@ void SessionStatsPlugin::StartGame(std::string eventName) {
 }
 
 void SessionStatsPlugin::EndGame(std::string eventName) {
+	updateStats();
+}
+
+void SessionStatsPlugin::updateStats() {
 	cvarManager->log("===EndGame==================================");
 
 	if (stats.count(currentPlaylist) != 0) {

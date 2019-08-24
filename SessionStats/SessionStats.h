@@ -22,12 +22,14 @@ private:
 
 	void writeStats();
 	void logStatusToConsole(std::string oldValue, CVarWrapper cvar);
+	void updateStats();
 public:
 	virtual void onLoad();
 	virtual void onUnload();
 
 	void StartGame(std::string eventName);
 	void EndGame(std::string eventName);
+	void onMainMenu(std::string eventName);
 	void Render(CanvasWrapper canvas);
 	void ResetStats();
 };
