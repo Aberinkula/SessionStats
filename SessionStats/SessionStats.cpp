@@ -29,14 +29,6 @@ BAKKESMOD_PLUGIN(SessionStatsPlugin, "Session Stats plugin", "1.01", 0)
 
 void SessionStatsPlugin::onLoad() {
 
-	std::string obsDir = "F:/Downloads";
-	int pos = 0;
-	while ((pos = obsDir.find("/", pos)) != std::string::npos) {
-		obsDir.replace(pos, 1, "\\");
-		pos += 1;
-	}
-	cvarManager->log("OUTPUT DIR:");
-	cvarManager->log(obsDir);
 	// log startup to console
 	std::stringstream ss;
 	ss << exports.pluginName << " version: " << exports.pluginVersion;
