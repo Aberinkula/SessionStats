@@ -24,7 +24,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include <fstream>
 
 //#include <sysinfoapi.h>
-BAKKESMOD_PLUGIN(SessionStatsPlugin, "Session Stats plugin", "1.01", 0)
+BAKKESMOD_PLUGIN(SessionStatsPlugin, "Session Stats plugin", "1.03", 0)
 
 
 void SessionStatsPlugin::onLoad() {
@@ -69,20 +69,22 @@ void SessionStatsPlugin::ResetStats() {
 void SessionStatsPlugin::onMainMenu(std::string eventName) {
 	cvarManager->log("=======Main Menu=======");
 	cvarManager->log("=======================");
-	updateStats(2);
+	updateStats(5);
 }
 void SessionStatsPlugin::StartGame(std::string eventName) {
 	cvarManager->log("====BeginState==============================");
 
-	if (!gameWrapper->IsInOnlineGame())
+	if (!gameWrapper->IsInOnlineGame() || gameWrapper->IsInReplay())
 		return;
+
 	CarWrapper me = gameWrapper->GetLocalCar();
 	PriWrapper mePRI = me.GetPRI();
 	mySteamID = mePRI.GetUniqueId();
 	cvarManager->log("SteamID: " + std::to_string(mySteamID.ID));
 
 	ServerWrapper sw = gameWrapper->GetOnlineGame();
-	if (!sw.IsNull()) {
+
+	if (!sw.IsNull() && sw.IsOnlineMultiplayer()) {
 		MMRWrapper mw = gameWrapper->GetMMRWrapper();
 		currentPlaylist = mw.GetCurrentPlaylist();
 		float mmr = mw.GetPlayerMMR(mySteamID, currentPlaylist);
@@ -101,32 +103,38 @@ void SessionStatsPlugin::StartGame(std::string eventName) {
 }
 
 void SessionStatsPlugin::EndGame(std::string eventName) {
-	updateStats(10);
+	updateStats(5);
 }
 
 void SessionStatsPlugin::updateStats(int retryCount) {
+	ServerWrapper sw = gameWrapper->GetOnlineGame();
+
+	if (sw.IsNull() || !sw.IsOnlineMultiplayer() || gameWrapper->IsInReplay())
+		return;
+
 	std::stringstream ss;
 	ss << "===EndGame==================================  " << retryCount;
 	cvarManager->log(ss.str());
 
-	if (retryCount > 10 || retryCount < 0)
+	if (retryCount > 20 || retryCount < 0)
 		return;
 
 	if (stats.count(currentPlaylist) != 0) {
 		cvarManager->log("Updating current playlist");
-		gameWrapper->SetTimeout([&](GameWrapper* gameWrapper) {
+		gameWrapper->SetTimeout([retryCount,this](GameWrapper* gameWrapper) {
 			bool gotNewMMR = false;
 			int count = 0;
 			float mmr = -1.0f;
 			bool writeObs = cvarManager->getCvar("cl_sessionstats_obs_output").getBoolValue();
 
 			while (!gotNewMMR && (count < 1)) {// only try 10 times, then give up
-				//ss.clear();
+				std::stringstream ss2;
 				mmr = gameWrapper->GetMMRWrapper().GetPlayerMMR(mySteamID, currentPlaylist);
-				//ss << "Got updated MMR " << mmr << " old MMR was: " << stats[currentPlaylist].currentMMR;
-				//cvarManager->log(ss.str());
+				ss2 << "Retry Count: " << retryCount << " Got updated MMR " << mmr << " old MMR was: " << stats[currentPlaylist].currentMMR;
+				cvarManager->log(ss2.str());
 
 				if (mmr > stats[currentPlaylist].currentMMR) {
+					stats[currentPlaylist].currentMMR = mmr;
 					stats[currentPlaylist].wins++;
 					if (stats[currentPlaylist].streak < 0)
 						stats[currentPlaylist].streak = 1;
@@ -135,6 +143,7 @@ void SessionStatsPlugin::updateStats(int retryCount) {
 					gotNewMMR = true;
 				}
 				else if (mmr < stats[currentPlaylist].currentMMR) {
+					stats[currentPlaylist].currentMMR = mmr;
 					stats[currentPlaylist].losses++;
 					if (stats[currentPlaylist].streak > 0)
 						stats[currentPlaylist].streak = -1;
@@ -147,15 +156,14 @@ void SessionStatsPlugin::updateStats(int retryCount) {
 					gameWrapper->SetTimeout([retryCount, this](GameWrapper* gameWrapper) {
 						this->updateStats(retryCount - 1);
 					}, 0.2f);
-				//Sleep(200);
-				//cvarManager->log("slept");
 			}
-			stats[currentPlaylist].currentMMR = mmr;
-			std::stringstream ss;
-			ss << "writeObs: " << writeObs << " write to: " << cvarManager->getCvar("cl_sessionstats_obs_directory").getStringValue();
-			cvarManager->log(ss.str());
-			if (writeObs)
-				writeStats();
+			if (gotNewMMR) {
+				std::stringstream ss;
+				ss << "writeObs: " << writeObs << " write to: " << cvarManager->getCvar("cl_sessionstats_obs_directory").getStringValue();
+				cvarManager->log(ss.str());
+				if (writeObs)
+					writeStats();
+			}
 			//ss.clear();
 			//ss << "======== w:" << stats[currentPlaylist].wins << " l:" << stats[currentPlaylist].losses << " MMR: " << (stats[currentPlaylist].currentMMR - stats[currentPlaylist].initialMMR) << " currentPlaylist: " << currentPlaylist;
 			//cvarManager->log(ss.str());
