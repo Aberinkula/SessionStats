@@ -24,7 +24,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include <fstream>
 
 //#include <sysinfoapi.h>
-BAKKESMOD_PLUGIN(SessionStatsPlugin, "Session Stats plugin", "1.03", 0)
+BAKKESMOD_PLUGIN(SessionStatsPlugin, "Session Stats plugin", "1.04", 0)
 
 
 void SessionStatsPlugin::onLoad() {
@@ -77,9 +77,7 @@ void SessionStatsPlugin::StartGame(std::string eventName) {
 	if (!gameWrapper->IsInOnlineGame() || gameWrapper->IsInReplay())
 		return;
 
-	CarWrapper me = gameWrapper->GetLocalCar();
-	PriWrapper mePRI = me.GetPRI();
-	mySteamID = mePRI.GetUniqueId();
+	mySteamID.ID = gameWrapper->GetSteamID();
 	cvarManager->log("SteamID: " + std::to_string(mySteamID.ID));
 
 	ServerWrapper sw = gameWrapper->GetOnlineGame();
