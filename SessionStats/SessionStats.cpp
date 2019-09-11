@@ -23,6 +23,8 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include <set>
 #include <fstream>
 
+#define NEW_METHOD
+
 //#include <sysinfoapi.h>
 BAKKESMOD_PLUGIN(SessionStatsPlugin, "Session Stats plugin", "1.04", 0)
 
@@ -34,10 +36,13 @@ void SessionStatsPlugin::onLoad() {
 	ss << exports.pluginName << " version: " << exports.pluginVersion;
 	cvarManager->log(ss.str());
 
+	teamNumber = -1;
+
 	// create cvars
 	cvarManager->registerCvar("cl_sessionstats_obs_output", "0", "Output text stats to files to be used as OBS sources", true, true, 0, true, 1, true); 
 	cvarManager->registerCvar("cl_sessionstats_obs_directory", "bakkesmod/data", "Directory to write OBS text output files to (use forward slash '/' as separator in path", true, false, (0.0F), false, (0.0F), true); //.bindTo(obsDir);
-	cvarManager->registerCvar("cl_sessionstats_display_stats", "0", "Display session stats on screen", true, true, 0, true, 1, true); 
+	cvarManager->registerCvar("cl_sessionstats_display_stats", "0", "Display session stats on screen", true, true, 0, true, 1, true);
+	cvarManager->registerCvar("cl_sessionstats_display_toast", "0", "Display toast popup after a match", true, true, 0, true, 1, true);
 
 	// hook cvars
 	cvarManager->registerNotifier("cl_sessionstats_reset", [this](std::vector<string> params) {
@@ -46,6 +51,7 @@ void SessionStatsPlugin::onLoad() {
 	cvarManager->getCvar("cl_sessionstats_obs_output").addOnValueChanged(std::bind(&SessionStatsPlugin::logStatusToConsole, this, std::placeholders::_1, std::placeholders::_2));
 	cvarManager->getCvar("cl_sessionstats_obs_directory").addOnValueChanged(std::bind(&SessionStatsPlugin::logStatusToConsole, this, std::placeholders::_1, std::placeholders::_2));
 	cvarManager->getCvar("cl_sessionstats_display_stats").addOnValueChanged(std::bind(&SessionStatsPlugin::logStatusToConsole, this, std::placeholders::_1, std::placeholders::_2));
+
 
 	// init state
 	currentPlaylist = -1;
@@ -83,13 +89,25 @@ void SessionStatsPlugin::StartGame(std::string eventName) {
 	ServerWrapper sw = gameWrapper->GetOnlineGame();
 
 	if (!sw.IsNull() && sw.IsOnlineMultiplayer()) {
+		CarWrapper me = gameWrapper->GetLocalCar();
+		stringstream ss;
+
+		if (!me.IsNull()) {
+			teamNumber = me.GetTeamNum2();
+			ss << "Player is on team " << teamNumber;
+		}
+		else {
+			teamNumber = -1;
+			ss << "Team number not found yet!";
+		}
+		cvarManager->log(ss.str());
 		MMRWrapper mw = gameWrapper->GetMMRWrapper();
 		currentPlaylist = mw.GetCurrentPlaylist();
 		float mmr = mw.GetPlayerMMR(mySteamID, currentPlaylist);
 		if (stats.find(currentPlaylist) == stats.end()) 
 			stats[currentPlaylist] = StatsStruct { mmr, mmr, 0, 0, 0, 0, 0 };
 		
-		stringstream ss;
+		ss.clear();
 		ss << "steamID: " << std::to_string(mySteamID.ID) << " MMR: " << mmr << " currentPlaylist: " << currentPlaylist;
 		cvarManager->log(ss.str());
 		if (cvarManager->getCvar("cl_sessionstats_obs_output").getBoolValue())
@@ -100,7 +118,56 @@ void SessionStatsPlugin::StartGame(std::string eventName) {
 	}
 }
 
+
 void SessionStatsPlugin::EndGame(std::string eventName) {
+#ifdef NEW_METHOD
+	std::stringstream ss;
+	ss << "===EndGame=== currentPlaylist:" << currentPlaylist << "==================================  ";
+	cvarManager->log(ss.str());
+	if (teamNumber == -1) { // we couldn't find the team number, try one last time, though localcar seems to always be null at this point
+		CarWrapper me = gameWrapper->GetLocalCar();
+		if (!me.IsNull())
+			teamNumber = me.GetTeamNum2();
+	}
+
+	ServerWrapper sw = gameWrapper->GetOnlineGame();
+	if (!sw.IsNull()) {
+		ArrayWrapper<TeamWrapper> teams = sw.GetTeams();
+		if (teams.Count() == 2) {
+			ArrayWrapper<PriWrapper> players0 = teams.Get(0).GetMembers();
+			ArrayWrapper<PriWrapper> players1 = teams.Get(1).GetMembers();
+			int score0 = teams.Get(0).GetScore();
+			int score1 = teams.Get(1).GetScore();
+			if ((score0 > score1 && teamNumber == 0) || (score1 > score0 && teamNumber == 1)) {
+				// log win
+				stats[currentPlaylist].wins++;
+				if (stats[currentPlaylist].streak < 0)
+					stats[currentPlaylist].streak = 1;
+				else
+					stats[currentPlaylist].streak++;
+			}
+			else {
+				// log loss
+				stats[currentPlaylist].losses++;
+				if (stats[currentPlaylist].streak > 0)
+					stats[currentPlaylist].streak = -1;
+				else
+					stats[currentPlaylist].streak--;
+			}
+		}
+		else {
+			ss.clear();
+			ss << " Wrong num of teams: " << teams.Count();
+			cvarManager->log(ss.str());
+		}
+	}
+	else {
+		cvarManager->log("server is null?");
+	}
+
+
+#endif
+	teamNumber = -1;
 	updateStats(5);
 }
 
@@ -111,7 +178,7 @@ void SessionStatsPlugin::updateStats(int retryCount) {
 		return;
 
 	std::stringstream ss;
-	ss << "===EndGame==================================  " << retryCount;
+	ss << "===updateStats==================================  " << retryCount;
 	cvarManager->log(ss.str());
 
 	if (retryCount > 20 || retryCount < 0)
@@ -121,41 +188,54 @@ void SessionStatsPlugin::updateStats(int retryCount) {
 		cvarManager->log("Updating current playlist");
 		gameWrapper->SetTimeout([retryCount,this](GameWrapper* gameWrapper) {
 			bool gotNewMMR = false;
-			int count = 0;
 			float mmr = -1.0f;
 			bool writeObs = cvarManager->getCvar("cl_sessionstats_obs_output").getBoolValue();
-
-			while (!gotNewMMR && (count < 1)) {// only try 10 times, then give up
+			while (!gotNewMMR) {
 				std::stringstream ss2;
-				mmr = gameWrapper->GetMMRWrapper().GetPlayerMMR(mySteamID, currentPlaylist);
-				ss2 << "Retry Count: " << retryCount << " Got updated MMR " << mmr << " old MMR was: " << stats[currentPlaylist].currentMMR;
-				cvarManager->log(ss2.str());
+				if (1 || (gameWrapper->GetMMRWrapper().IsSynced(mySteamID, currentPlaylist) && !gameWrapper->GetMMRWrapper().IsSyncing(mySteamID))) {
+					mmr = gameWrapper->GetMMRWrapper().GetPlayerMMR(mySteamID, currentPlaylist);
+					ss2 << "Retry Count: " << retryCount << " Got updated MMR " << mmr << " old MMR was: " << stats[currentPlaylist].currentMMR;
+					cvarManager->log(ss2.str());
 
-				if (mmr > stats[currentPlaylist].currentMMR) {
-					stats[currentPlaylist].currentMMR = mmr;
-					stats[currentPlaylist].wins++;
-					if (stats[currentPlaylist].streak < 0)
-						stats[currentPlaylist].streak = 1;
-					else
-						stats[currentPlaylist].streak++;
-					gotNewMMR = true;
+					if (mmr > stats[currentPlaylist].currentMMR) {
+						stats[currentPlaylist].currentMMR = mmr;
+#ifndef NEW_METHOD
+						stats[currentPlaylist].wins++;
+						if (stats[currentPlaylist].streak < 0)
+							stats[currentPlaylist].streak = 1;
+						else
+							stats[currentPlaylist].streak++;
+#endif /*NEW_METHOD */
+						gotNewMMR = true;
+					}
+					else if (mmr < stats[currentPlaylist].currentMMR) {
+						stats[currentPlaylist].currentMMR = mmr;
+#ifndef NEW_METHOD
+						stats[currentPlaylist].losses++;
+						if (stats[currentPlaylist].streak > 0)
+							stats[currentPlaylist].streak = -1;
+						else
+							stats[currentPlaylist].streak--;
+#endif /* NEW_METHOD */
+						gotNewMMR = true;
+					}
 				}
-				else if (mmr < stats[currentPlaylist].currentMMR) {
-					stats[currentPlaylist].currentMMR = mmr;
-					stats[currentPlaylist].losses++;
-					if (stats[currentPlaylist].streak > 0)
-						stats[currentPlaylist].streak = -1;
-					else
-						stats[currentPlaylist].streak--;
-					gotNewMMR = true;
-				}
-				count++;
 				if (!gotNewMMR && retryCount > 0)
 					gameWrapper->SetTimeout([retryCount, this](GameWrapper* gameWrapper) {
 						this->updateStats(retryCount - 1);
-					}, 0.2f);
+					}, 0.5f);
+				else {
+					stringstream statstring;
+					statstring << "Wins: " << stats[currentPlaylist].wins << " Losses: " << stats[currentPlaylist].losses << " Streak: " << stats[currentPlaylist].streak;
+					gameWrapper->Toast("SessionStats", statstring.str());
+				}
 			}
+#ifdef NEW_METHOD /* always write stats */
+			if (1) {
+#else
 			if (gotNewMMR) {
+#endif /* NEW_METHOD */
+
 				std::stringstream ss;
 				ss << "writeObs: " << writeObs << " write to: " << cvarManager->getCvar("cl_sessionstats_obs_directory").getStringValue();
 				cvarManager->log(ss.str());

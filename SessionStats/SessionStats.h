@@ -38,6 +38,7 @@ private:
 	void writeStats();
 	void logStatusToConsole(std::string oldValue, CVarWrapper cvar);
 	void updateStats(int retryCount);
+	int teamNumber;
 public:
 	virtual void onLoad();
 	virtual void onUnload();
